@@ -1,5 +1,5 @@
 /* Escáner de Stock · Service Worker (funcionamiento sin conexión) */
-const CACHE = 'escaner-stock-v1.0.0';
+const CACHE = 'escaner-stock-v1.1.0';
 const FILES = [
   './',
   './index.html',

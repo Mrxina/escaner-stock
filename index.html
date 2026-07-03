@@ -200,9 +200,18 @@
        y <b>RECUENTO</b> fija la cantidad contada (para inventarios).</p>
     <p><b>2.</b> Apunta la cámara al código de barras de la etiqueta. Cada lectura añade 1;
        puedes ajustar la cantidad con los botones − / + o tocando el número.</p>
-    <p><b>3.</b> Al terminar, pulsa <b>Exportar</b> y guarda el archivo en la carpeta de
-       OneDrive de Gestión de Stock. La próxima vez que se abra la aplicación del ordenador,
-       mostrará los movimientos para aceptarlos o rechazarlos.</p>
+    <p><b>3.</b> Al terminar, pulsa <b>Exportar</b> y elige cómo guardarlo:
+       <b>Enviar a OneDrive</b> (en el menú de compartir elige OneDrive y
+       podrás escoger la carpeta antes de subirlo) o <b>Descargar</b> (queda
+       en Descargas; muévelo a OneDrive desde su app). La próxima vez que se
+       abra la aplicación del ordenador, mostrará los movimientos para
+       aceptarlos o rechazarlos.</p>
+    <p><b>Catálogo:</b> en Gestión de Stock (ordenador), botón «📱 Puente
+       móvil» → «📤 Exportar catálogo para el móvil». Después, aquí:
+       menú ⋮ → «Importar catálogo…» y elige el archivo
+       <b>catalogo_movil.json</b> (puedes buscarlo directamente en OneDrive
+       desde el selector). Así verás el nombre de cada artículo al
+       escanear.</p>
     <p>Si un artículo aparece como <b>«No está en el catálogo»</b>, puede que el catálogo del
        móvil esté anticuado: expórtalo de nuevo desde Gestión de Stock e impórtalo aquí
        (menú ⋮).</p>
@@ -218,6 +227,22 @@
   </div>
 </dialog>
 
+<dialog id="dlg-export">
+  <div class="body">
+    <h2>¿Dónde guardar el archivo?</h2>
+    <p id="export-fname" style="word-break:break-all"></p>
+  </div>
+  <button class="menu-item" id="exp-share">📤 Enviar a OneDrive (compartir)
+    <small>Se abre el menú de compartir: elige OneDrive y podrás escoger
+    la carpeta antes de subirlo. Recomendado.</small></button>
+  <button class="menu-item" id="exp-carpeta" hidden>📁 Elegir carpeta y guardar
+    <small>Abre el selector de carpetas del sistema.</small></button>
+  <button class="menu-item" id="exp-descarga">⬇ Descargar
+    <small>Se guarda en la carpeta Descargas del móvil; luego muévelo a
+    OneDrive desde su app.</small></button>
+  <button class="menu-item" id="exp-cancelar">Cancelar</button>
+</dialog>
+
 <div id="toast" role="status"></div>
 <input type="file" id="file-cat" accept=".json,application/json" hidden>
 
@@ -228,7 +253,7 @@
    Escáner de Stock · PWA  v1.0.0
    Puente móvil para Gestión de Stock (FJD·UAM) vía OneDrive (JSON)
    ══════════════════════════════════════════════════════════════════ */
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const LS_LINEAS   = 'escaner.lineas';
 const LS_CATALOGO = 'escaner.catalogo';
 const LS_MODO     = 'escaner.modo';
@@ -481,33 +506,75 @@ function nombreArchivo(){
   const d = new Date(), p = (n)=>String(n).padStart(2,'0');
   return `PUENTE_MOVIL_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.json`;
 }
-$('#export').addEventListener('click', async ()=>{
-  const payload = {
+function payloadExport(){
+  return {
     version: 1, origen: 'movil-pwa', app_version: VERSION,
     generado: new Date().toISOString(), estado: 'pendiente',
     lineas: lineas.map(l=>({ cod:l.cod, descripcion:l.descripcion || (catalogo[l.cod]?.descripcion ?? ''),
                              almacen:l.almacen || (catalogo[l.cod]?.almacen ?? ''),
                              modo:l.modo, cantidad:l.cantidad }))
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-  const fname = nombreArchivo();
-  const file = new File([blob], fname, { type:'application/json' });
-  let compartido = false;
-  if (navigator.canShare && navigator.canShare({ files:[file] })){
-    try{ await navigator.share({ files:[file], title:'Movimientos de stock' }); compartido = true; }
-    catch(err){ if (err && err.name === 'AbortError') return; }
-  }
-  if (!compartido){
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = fname;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
-    toast('Archivo descargado. Muévelo a la carpeta de OneDrive de Gestión de Stock.', 4200);
-  }
+}
+async function postExport(){
   if (await confirmar('Exportación completada',
       '¿Quieres vaciar la lista de lecturas? (Hazlo solo si el archivo se ha guardado bien en OneDrive.)')){
     lineas = []; save(); render();
   }
+}
+$('#export').addEventListener('click', ()=>{
+  const dlg = $('#dlg-export');
+  $('#export-fname').textContent = 'Archivo: ' + nombreArchivo();
+  // «Elegir carpeta» solo si el navegador lo permite (p. ej. Chrome de PC)
+  $('#exp-carpeta').hidden = !('showSaveFilePicker' in window);
+  dlg.showModal();
+});
+$('#exp-cancelar').addEventListener('click', ()=>$('#dlg-export').close());
+
+$('#exp-share').addEventListener('click', async ()=>{
+  $('#dlg-export').close();
+  const blob = new Blob([JSON.stringify(payloadExport(), null, 2)], { type:'application/json' });
+  const file = new File([blob], nombreArchivo(), { type:'application/json' });
+  if (navigator.canShare && navigator.canShare({ files:[file] })){
+    try{
+      await navigator.share({ files:[file], title:'Movimientos de stock' });
+      await postExport();
+    }catch(err){
+      if (err && err.name === 'AbortError') return;   // canceló el menú
+      toast('No se pudo compartir. Prueba con «Descargar».', 3600); beep(false);
+    }
+  } else {
+    toast('Este navegador no permite compartir archivos. Usa «Descargar».', 3600);
+  }
+});
+
+$('#exp-carpeta').addEventListener('click', async ()=>{
+  $('#dlg-export').close();
+  try{
+    const handle = await window.showSaveFilePicker({
+      suggestedName: nombreArchivo(),
+      types: [{ description:'Archivo JSON', accept:{'application/json':['.json']} }]
+    });
+    const w = await handle.createWritable();
+    await w.write(JSON.stringify(payloadExport(), null, 2));
+    await w.close();
+    toast('Archivo guardado ✓');
+    await postExport();
+  }catch(err){
+    if (err && err.name === 'AbortError') return;     // canceló el selector
+    toast('No se pudo guardar ahí. Prueba con «Descargar».', 3600); beep(false);
+  }
+});
+
+$('#exp-descarga').addEventListener('click', async ()=>{
+  $('#dlg-export').close();
+  const blob = new Blob([JSON.stringify(payloadExport(), null, 2)], { type:'application/json' });
+  const fname = nombreArchivo();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  toast('Descargado en la carpeta Descargas. Muévelo a OneDrive desde su app.', 4200);
+  await postExport();
 });
 
 /* ── Menú ────────────────────────────────────────────────────────── */
