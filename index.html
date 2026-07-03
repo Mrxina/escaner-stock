@@ -253,7 +253,7 @@
    Escáner de Stock · PWA  v1.0.0
    Puente móvil para Gestión de Stock (FJD·UAM) vía OneDrive (JSON)
    ══════════════════════════════════════════════════════════════════ */
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const LS_LINEAS   = 'escaner.lineas';
 const LS_CATALOGO = 'escaner.catalogo';
 const LS_MODO     = 'escaner.modo';
@@ -502,9 +502,9 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 /* ── Exportar (puente OneDrive) ──────────────────────────────────── */
-function nombreArchivo(){
+function nombreArchivo(ext='json'){
   const d = new Date(), p = (n)=>String(n).padStart(2,'0');
-  return `PUENTE_MOVIL_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.json`;
+  return `PUENTE_MOVIL_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
 }
 function payloadExport(){
   return {
@@ -530,20 +530,47 @@ $('#export').addEventListener('click', ()=>{
 });
 $('#exp-cancelar').addEventListener('click', ()=>$('#dlg-export').close());
 
+function _archivoExport(nombre, mime){
+  const data = JSON.stringify(payloadExport(), null, 2);
+  return new File([new Blob([data], { type: mime })], nombre, { type: mime });
+}
+function mejorArchivoCompartible(){
+  /* Chrome en Android solo deja compartir ciertos tipos de archivo y los
+     .json NO están permitidos (además, canShare a veces dice que sí y luego
+     share() falla). Por eso la primera opción es el nombre acabado en .txt,
+     que sí está permitido; Gestión de Stock acepta ambas extensiones. */
+  const base = nombreArchivo();
+  const variantes = [
+    [base + '.txt', 'text/plain'],       // PUENTE_MOVIL_….json.txt  (Android ✓)
+    [base,          'application/json'],
+    [base,          'text/plain'],
+  ];
+  if (!navigator.canShare) return null;
+  for (const [n, m] of variantes){
+    try{
+      const f = _archivoExport(n, m);
+      if (navigator.canShare({ files: [f] })) return f;
+    }catch(_){}
+  }
+  return null;
+}
 $('#exp-share').addEventListener('click', async ()=>{
   $('#dlg-export').close();
-  const blob = new Blob([JSON.stringify(payloadExport(), null, 2)], { type:'application/json' });
-  const file = new File([blob], nombreArchivo(), { type:'application/json' });
-  if (navigator.canShare && navigator.canShare({ files:[file] })){
-    try{
-      await navigator.share({ files:[file], title:'Movimientos de stock' });
-      await postExport();
-    }catch(err){
-      if (err && err.name === 'AbortError') return;   // canceló el menú
-      toast('No se pudo compartir. Prueba con «Descargar».', 3600); beep(false);
-    }
-  } else {
-    toast('Este navegador no permite compartir archivos. Usa «Descargar».', 3600);
+  const file = mejorArchivoCompartible();
+  if (!file){
+    toast('Este navegador no permite compartir este archivo. Se descargará en su lugar.', 3800);
+    setTimeout(()=>$('#exp-descarga').click(), 1200);
+    return;
+  }
+  try{
+    await navigator.share({ files:[file] });
+    await postExport();
+  }catch(err){
+    if (err && err.name === 'AbortError') return;   // canceló el menú
+    const det = err ? `${err.name || ''} ${err.message || ''}`.trim() : '?';
+    toast(`No se pudo compartir (${det}). Se descargará en su lugar.`, 5000);
+    beep(false);
+    setTimeout(()=>$('#exp-descarga').click(), 1600);
   }
 });
 
